@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base dark theme colors -->
+    <color name="background_primary">#111827</color>
+    <color name="background_secondary">#1F2937</color>
+    <color name="background_tertiary">#374151</color>
+
+    <!-- Text colors -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#9CA3AF</color>
+    <color name="text_tertiary">#6B7280</color>
+
+    <!-- Alice (teal) -->
+    <color name="alice_primary">#0D9488</color>
+    <color name="alice_dark">#0F766E</color>
+    <color name="alice_light">#14B8A6</color>
+
+    <!-- Bob (orange) -->
+    <color name="bob_primary">#EA580C</color>
+    <color name="bob_dark">#C2410C</color>
+    <color name="bob_light">#F97316</color>
+
+    <!-- Crypto state colors -->
+    <color name="key_root">#FBBF24</color>
+    <color name="key_chain">#A855F7</color>
+    <color name="key_message">#22C55E</color>
+    <color name="key_nonce">#3B82F6</color>
+    <color name="key_ciphertext">#EC4899</color>
+    <color name="key_tag">#F59E0B</color>
+
+    <!-- UI elements -->
+    <color name="divider">#374151</color>
+    <color name="disabled">#4B5563</color>
+</resources>
