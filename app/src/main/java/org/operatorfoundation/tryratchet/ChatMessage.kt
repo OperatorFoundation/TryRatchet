@@ -1,8 +1,9 @@
 package org.operatorfoundation.tryratchet
 
 /**
- * Represents a chat message in the demo, including the plaintext,
- * crypto details, and metadata about the ratchet operation used.
+ * - decryptionSuccess: Did the receiver successfully decrypt?
+ * - decryptedText: What text did decryption produce?
+ * - keysMatched: Did both parties derive the same message key?
  */
 data class ChatMessage(
     val id: Long,
@@ -11,10 +12,24 @@ data class ChatMessage(
     val nonce: ByteArray,
     val ciphertext: ByteArray,
     val tag: ByteArray,
-    val ratchetType: RatchetType
+    val ratchetType: RatchetType,
+    // Test results
+    val decryptionSuccess: Boolean,
+    val decryptedText: String?,
+    val keysMatched: Boolean
 ) {
     enum class Sender { ALICE, BOB }
     enum class RatchetType { DH, SYMMETRIC }
+
+    /**
+     * Overall test passed: decryption worked and output matches input.
+     */
+    fun testPassed(): Boolean
+    {
+        return decryptionSuccess &&
+                keysMatched &&
+                decryptedText == plaintext
+    }
 
     /**
      * Format a ByteArray as a hex string.

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import org.operatorfoundation.tryratchet.ChatMessage
+import org.operatorfoundation.tryratchet.CryptoTestResults
 import org.operatorfoundation.tryratchet.MainViewModel
 import org.operatorfoundation.tryratchet.R
 import org.operatorfoundation.tryratchet.ui.theme.*
@@ -37,100 +38,143 @@ fun TryRatchetScreen(
     viewModel: MainViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val testResults by viewModel.testResults.collectAsState()
     var fullValueDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var messageText by remember { mutableStateOf("") }
     var cryptoStateExpanded by remember { mutableStateOf(false) }
     var textFieldFocused by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BackgroundPrimary)
-    ) {
-        // Header
-        Header(
-            isStarted = uiState.isStarted,
-            onStart = { viewModel.start() },
-            onReset = { viewModel.reset() }
+    if (testResults != null)
+    {
+        TestResultsSheet(
+            results = testResults!!,
+            onDismiss = { viewModel.clearTestResults() }
         )
-
-        HorizontalDivider(color = Divider, thickness = 1.dp)
-
-        // Crypto State Panel
-        if (uiState.isStarted) {
-            CryptoStatePanel(
-                aliceState = uiState.aliceState,
-                bobState = uiState.bobState,
-                expanded = cryptoStateExpanded,
-                onToggle = { cryptoStateExpanded = !cryptoStateExpanded },
-                onShowFullValue = { label, value -> fullValueDialog = Pair(label, value) }
-            )
-            HorizontalDivider(color = Divider, thickness = 1.dp)
-        }
-
-        // Chat area
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        ) {
-            when {
-                !uiState.isStarted -> EmptyStateNotStarted()
-                uiState.messages.isEmpty() -> EmptyStateStarted()
-                else -> MessageList(messages = uiState.messages)
-            }
-        }
-
-        // Input area
-        if (uiState.isStarted)
+    }
+    else
+    {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(BackgroundPrimary)
+        )
         {
-            Column(modifier = Modifier.imePadding()) {
+            // Header
+            Header(
+                isStarted = uiState.isStarted,
+                onStart = { viewModel.start() },
+                onReset = { viewModel.reset() },
+                onRunTests = { viewModel.runTests() }
+            )
+
+            // Show initial root key agreement status
+            if (uiState.isStarted && uiState.initialRootKeysMatch != null)
+            {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (uiState.initialRootKeysMatch!!) KeyMessage.copy(alpha = 0.1f) else Color(0xFFEF4444).copy(alpha = 0.1f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            if (uiState.initialRootKeysMatch!!) R.drawable.ic_check else R.drawable.ic_error
+                        ),
+                        contentDescription = null,
+                        tint = if (uiState.initialRootKeysMatch!!) KeyMessage else Color(0xFFEF4444),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (uiState.initialRootKeysMatch!!) {
+                            "Initial root keys match ✓"
+                        } else {
+                            "Initial root keys DO NOT match ✗"
+                        },
+                        color = if (uiState.initialRootKeysMatch!!) KeyMessage else Color(0xFFEF4444),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Divider, thickness = 1.dp)
+
+            // Crypto State Panel
+            if (uiState.isStarted) {
+                CryptoStatePanel(
+                    aliceState = uiState.aliceState,
+                    bobState = uiState.bobState,
+                    expanded = cryptoStateExpanded,
+                    onToggle = { cryptoStateExpanded = !cryptoStateExpanded },
+                    onShowFullValue = { label, value -> fullValueDialog = Pair(label, value) }
+                )
                 HorizontalDivider(color = Divider, thickness = 1.dp)
-                InputArea(
-                    messageText = messageText,
-                    onMessageChange = { messageText = it },
-                    onSendAlice = {
-                        if (messageText.isNotBlank()) {
-                            viewModel.sendFromAlice(messageText)
-                            messageText = ""
-                            keyboardController?.hide()
+            }
+
+            // Chat area
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when {
+                    !uiState.isStarted -> EmptyStateNotStarted()
+                    uiState.messages.isEmpty() -> EmptyStateStarted()
+                    else -> MessageList(messages = uiState.messages)
+                }
+            }
+
+            // Input area
+            if (uiState.isStarted)
+            {
+                Column(modifier = Modifier.imePadding()) {
+                    HorizontalDivider(color = Divider, thickness = 1.dp)
+                    InputArea(
+                        messageText = messageText,
+                        onMessageChange = { messageText = it },
+                        onSendAlice = {
+                            if (messageText.isNotBlank()) {
+                                viewModel.sendFromAlice(messageText)
+                                messageText = ""
+                                keyboardController?.hide()
+                            }
+                        },
+                        onSendBob = {
+                            if (messageText.isNotBlank()) {
+                                viewModel.sendFromBob(messageText)
+                                messageText = ""
+                                keyboardController?.hide()
+                            }
+                        },
+                        onFocusChanged = { focused ->
+                            if (focused) cryptoStateExpanded = false
+                        }
+                    )
+                }
+            }
+
+            fullValueDialog?.let { (label, value) ->
+                AlertDialog(
+                    onDismissRequest = { fullValueDialog = null },
+                    title = { Text(label) },
+                    text = {
+                        SelectionContainer() {
+                            Text(
+                                text = value,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp
+                            )
                         }
                     },
-                    onSendBob = {
-                        if (messageText.isNotBlank()) {
-                            viewModel.sendFromBob(messageText)
-                            messageText = ""
-                            keyboardController?.hide()
+                    confirmButton = {
+                        TextButton(onClick = { fullValueDialog = null }) {
+                            Text("Close")
                         }
-                    },
-                    onFocusChanged = { focused ->
-                        if (focused) cryptoStateExpanded = false
                     }
                 )
             }
-        }
-
-        fullValueDialog?.let { (label, value) ->
-            AlertDialog(
-                onDismissRequest = { fullValueDialog = null },
-                title = { Text(label) },
-                text = {
-                    SelectionContainer() {
-                        Text(
-                            text = value,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { fullValueDialog = null }) {
-                        Text("Close")
-                    }
-                }
-            )
         }
     }
 }
@@ -139,7 +183,8 @@ fun TryRatchetScreen(
 private fun Header(
     isStarted: Boolean,
     onStart: () -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onRunTests: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -172,14 +217,24 @@ private fun Header(
             )
         }
 
-        if (!isStarted) {
+        Button(
+            onClick = onRunTests,
+            colors = ButtonDefaults.buttonColors(containerColor = KeyChain)
+        ) {
+            Text("Test")
+        }
+
+        if (!isStarted)
+        {
             Button(
                 onClick = onStart,
                 colors = ButtonDefaults.buttonColors(containerColor = AlicePrimary)
             ) {
                 Text("Start")
             }
-        } else {
+        }
+        else
+        {
             Button(
                 onClick = onReset,
                 colors = ButtonDefaults.buttonColors(containerColor = BackgroundTertiary)
@@ -463,7 +518,7 @@ private fun MessageBubble(message: ChatMessage) {
                 .widthIn(max = 280.dp)
         )
 
-        // Ratchet type toggle
+        // Ratchet type
         Row(
             modifier = Modifier
                 .clickable { expanded = !expanded }
@@ -485,6 +540,28 @@ private fun MessageBubble(message: ChatMessage) {
             )
         }
 
+        // Test status indicator
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val passed = message.testPassed()
+            Icon(
+                painter = painterResource(
+                    if (passed) R.drawable.ic_check else R.drawable.ic_error
+                ),
+                contentDescription = null,
+                tint = if (passed) KeyMessage else Color(0xFFEF4444),
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                text = if (passed) "Decrypt OK" else "Decrypt FAILED",
+                color = if (passed) KeyMessage else Color(0xFFEF4444),
+                fontSize = 10.sp
+            )
+        }
+
         // Crypto details
         AnimatedVisibility(visible = expanded) {
             Column(
@@ -496,6 +573,22 @@ private fun MessageBubble(message: ChatMessage) {
                 CryptoDetailRow("nonce:", message.nonceHex(), KeyNonce)
                 CryptoDetailRow("ciphertext:", message.ciphertextHexTruncated(), KeyCiphertext)
                 CryptoDetailRow("tag:", message.tagHex(), KeyTag)
+
+                // Test results
+                CryptoDetailRow(
+                    "keys match:",
+                    if (message.keysMatched) "yes" else "NO",
+                    if (message.keysMatched) KeyMessage else Color(0xFFEF4444)
+                )
+                CryptoDetailRow(
+                    "decrypt:",
+                    if (message.decryptionSuccess) "success" else "FAILED",
+                    if (message.decryptionSuccess) KeyMessage else Color(0xFFEF4444)
+                )
+
+                if (message.decryptedText != null) {
+                    CryptoDetailRow("output:", "\"${message.decryptedText}\"", TextSecondary)
+                }
             }
         }
     }
@@ -590,6 +683,124 @@ private fun InputArea(
             ) {
                 Text("Bob", fontSize = 16.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun TestResultsSheet(
+    results: CryptoTestResults,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundPrimary)
+            .padding(16.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Test Results",
+                color = TextPrimary,
+                fontSize = 20.sp,
+                style = MaterialTheme.typography.titleLarge
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_close),
+                    contentDescription = "Close",
+                    tint = TextSecondary
+                )
+            }
+        }
+
+        // Summary
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "✓ ${results.passCount} passed",
+                color = KeyMessage,
+                fontSize = 14.sp
+            )
+            Text(
+                text = "✗ ${results.failCount} failed",
+                color = if (results.failCount > 0) Color(0xFFEF4444) else TextTertiary,
+                fontSize = 14.sp
+            )
+        }
+
+        HorizontalDivider(color = Divider)
+
+        // Results list
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 12.dp)
+        ) {
+            items(results.tests) { test ->
+                TestResultItem(test)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TestResultItem(test: CryptoTestResults.TestResult) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(BackgroundSecondary)
+            .padding(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = if (test.passed) "✓" else "✗",
+                color = if (test.passed) KeyMessage else Color(0xFFEF4444),
+                fontSize = 14.sp
+            )
+            Text(
+                text = test.name,
+                color = TextPrimary,
+                fontSize = 14.sp
+            )
+        }
+
+        Text(
+            text = test.category.name.replace("_", " "),
+            color = TextTertiary,
+            fontSize = 10.sp,
+            modifier = Modifier.padding(start = 22.dp, top = 2.dp)
+        )
+
+        Text(
+            text = test.details,
+            color = TextSecondary,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(start = 22.dp, top = 4.dp)
+        )
+
+        if (test.errorMessage != null) {
+            Text(
+                text = "Error: ${test.errorMessage}",
+                color = Color(0xFFEF4444),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(start = 22.dp, top = 4.dp)
+            )
         }
     }
 }
