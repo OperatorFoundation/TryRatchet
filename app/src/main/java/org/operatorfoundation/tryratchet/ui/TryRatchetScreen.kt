@@ -10,12 +10,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -34,8 +37,12 @@ fun TryRatchetScreen(
     viewModel: MainViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var fullValueDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var messageText by remember { mutableStateOf("") }
     var cryptoStateExpanded by remember { mutableStateOf(false) }
+    var textFieldFocused by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
 
     Column(
         modifier = modifier
@@ -57,7 +64,8 @@ fun TryRatchetScreen(
                 aliceState = uiState.aliceState,
                 bobState = uiState.bobState,
                 expanded = cryptoStateExpanded,
-                onToggle = { cryptoStateExpanded = !cryptoStateExpanded }
+                onToggle = { cryptoStateExpanded = !cryptoStateExpanded },
+                onShowFullValue = { label, value -> fullValueDialog = Pair(label, value) }
             )
             HorizontalDivider(color = Divider, thickness = 1.dp)
         }
@@ -78,20 +86,48 @@ fun TryRatchetScreen(
         // Input area
         if (uiState.isStarted)
         {
-            HorizontalDivider(color = Divider, thickness = 1.dp)
-            InputArea(
-                messageText = messageText,
-                onMessageChange = { messageText = it },
-                onSendAlice = {
-                    if (messageText.isNotBlank()) {
-                        viewModel.sendFromAlice(messageText)
-                        messageText = ""
+            Column(modifier = Modifier.imePadding()) {
+                HorizontalDivider(color = Divider, thickness = 1.dp)
+                InputArea(
+                    messageText = messageText,
+                    onMessageChange = { messageText = it },
+                    onSendAlice = {
+                        if (messageText.isNotBlank()) {
+                            viewModel.sendFromAlice(messageText)
+                            messageText = ""
+                            keyboardController?.hide()
+                        }
+                    },
+                    onSendBob = {
+                        if (messageText.isNotBlank()) {
+                            viewModel.sendFromBob(messageText)
+                            messageText = ""
+                            keyboardController?.hide()
+                        }
+                    },
+                    onFocusChanged = { focused ->
+                        if (focused) cryptoStateExpanded = false
+                    }
+                )
+            }
+        }
+
+        fullValueDialog?.let { (label, value) ->
+            AlertDialog(
+                onDismissRequest = { fullValueDialog = null },
+                title = { Text(label) },
+                text = {
+                    SelectionContainer() {
+                        Text(
+                            text = value,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp
+                        )
                     }
                 },
-                onSendBob = {
-                    if (messageText.isNotBlank()) {
-                        viewModel.sendFromBob(messageText)
-                        messageText = ""
+                confirmButton = {
+                    TextButton(onClick = { fullValueDialog = null }) {
+                        Text("Close")
                     }
                 }
             )
@@ -165,7 +201,8 @@ private fun CryptoStatePanel(
     aliceState: MainViewModel.PartyState?,
     bobState: MainViewModel.PartyState?,
     expanded: Boolean,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onShowFullValue: (label: String, value: String) -> Unit
 ) {
     Column {
         // Toggle header
@@ -206,7 +243,8 @@ private fun CryptoStatePanel(
                         name = "Alice",
                         state = it,
                         accentColor = AlicePrimary,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        onShowFullValue = onShowFullValue
                     )
                 }
                 bobState?.let {
@@ -214,7 +252,8 @@ private fun CryptoStatePanel(
                         name = "Bob",
                         state = it,
                         accentColor = BobPrimary,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        onShowFullValue = onShowFullValue
                     )
                 }
             }
@@ -227,7 +266,8 @@ private fun PartyStateCard(
     name: String,
     state: MainViewModel.PartyState,
     accentColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onShowFullValue: (label: String, value: String) -> Unit
 ) {
     Column(
         modifier = modifier
@@ -244,10 +284,33 @@ private fun PartyStateCard(
 
         Spacer(Modifier.height(8.dp))
 
-        KeyValueRow("Public Key", state.publicKeyHex(), accentColor)
-        KeyValueRow("Root Key", state.rootKeyHex(), KeyRoot)
-        KeyValueRow("Chain Key", state.chainKeyHex(), KeyChain)
-        KeyValueRow("Message Key", state.messageKeyHex(), KeyMessage)
+        KeyValueRow(
+            label = "Public Key",
+            value = state.publicKeyHexTruncated(),
+            valueColor = accentColor,
+            onTap = { onShowFullValue("Public Key", state.publicKeyHex()) }
+        )
+
+        KeyValueRow(
+            label = "Root Key",
+            value = state.rootKeyHexTruncated(),
+            valueColor = KeyRoot,
+            onTap = { onShowFullValue("Root Key", state.rootKeyHex())}
+            )
+
+        KeyValueRow(
+            label = "Chain Key",
+            value = state.chainKeyHexTruncated(),
+            valueColor = KeyChain,
+            onTap = { onShowFullValue("Chain Key", state.chainKeyHex()) }
+            )
+
+        KeyValueRow(
+            label = "Message Key",
+            value = state.messageKeyHexTruncated(),
+            valueColor = KeyMessage,
+            onTap = { onShowFullValue("Message Key", state.messageKeyHex()) }
+            )
 
         HorizontalDivider(
             color = Divider,
@@ -275,7 +338,12 @@ private fun PartyStateCard(
 }
 
 @Composable
-private fun KeyValueRow(label: String, value: String, valueColor: Color) {
+private fun KeyValueRow(
+    label: String,
+    value: String,
+    valueColor: Color,
+    onTap: (() -> Unit?)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -295,6 +363,7 @@ private fun KeyValueRow(label: String, value: String, valueColor: Color) {
             fontFamily = FontFamily.Monospace,
             modifier = Modifier
                 .background(BackgroundSecondary, RoundedCornerShape(4.dp))
+                .then( if (onTap != null) Modifier.clickable { onTap() } else Modifier)
                 .padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
@@ -456,7 +525,8 @@ private fun InputArea(
     messageText: String,
     onMessageChange: (String) -> Unit,
     onSendAlice: () -> Unit,
-    onSendBob: () -> Unit
+    onSendBob: () -> Unit,
+    onFocusChanged: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -467,7 +537,9 @@ private fun InputArea(
             value = messageText,
             onValueChange = onMessageChange,
             placeholder = { Text("Type a message...", color = TextTertiary) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { onFocusChanged(it.isFocused) },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = BackgroundSecondary,
                 unfocusedContainerColor = BackgroundSecondary,

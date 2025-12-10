@@ -24,10 +24,16 @@ class MainViewModel : ViewModel()
         val messageKey: ByteArray?,
         val ratchetStep: Int
     ) {
-        fun publicKeyHex() = publicKey.toHexTruncated()
-        fun rootKeyHex() = rootKey.toHexTruncated()
-        fun chainKeyHex() = chainKey?.toHexTruncated() ?: "—"
-        fun messageKeyHex() = messageKey?.toHexTruncated() ?: "—"
+        fun publicKeyHexTruncated() = publicKey.toHexTruncated()
+        fun rootKeyHexTruncated() = rootKey.toHexTruncated()
+        fun chainKeyHexTruncated() = chainKey?.toHexTruncated() ?: "—"
+        fun messageKeyHexTruncated() = messageKey?.toHexTruncated() ?: "—"
+        fun publicKeyHex() = publicKey.toHex()
+        fun rootKeyHex() = rootKey.toHex()
+        fun chainKeyHex() = chainKey?.toHex() ?: "—"
+        fun messageKeyHex() = messageKey?.toHex() ?: "—"
+
+        private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
         private fun ByteArray.toHexTruncated(maxLen: Int = 8): String
         {
