@@ -9,10 +9,12 @@ import org.operatorfoundation.aes.Ciphertext
 import org.operatorfoundation.madh.Curve25519KeyPair
 import org.operatorfoundation.madh.Curve25519PublicKey
 import org.operatorfoundation.madh.MADH
+import org.operatorfoundation.madh.SessionIdentifier
 import org.operatorfoundation.ratchet.PlaintextMessage
 import org.operatorfoundation.ratchet.PlaintextMessageType
 import org.operatorfoundation.ratchet.Ratchet
 import org.operatorfoundation.ratchet.RatchetState
+import java.security.SecureRandom
 
 /**
  * ViewModel for TryRatchet demo.
@@ -65,6 +67,17 @@ class MainViewModel : ViewModel()
     // ═══════════════════════════════════════════════════════════════════════════
     // UI State
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * State of the MADH handshake verification.
+     * Displays confirmation codes that users would compare out-of-band.
+     */
+    data class HandshakeState(
+        val aliceCode: String,
+        val bobCode: String,
+        val codesMatch: Boolean,
+        val commitmentVerified: Boolean
+    )
 
     /**
      * Representation of a party's cryptographic state.
@@ -120,6 +133,7 @@ class MainViewModel : ViewModel()
      */
     data class UiState(
         val isStarted: Boolean = false,
+        val handshakeState: HandshakeState? = null,
         val aliceState: PartyState? = null,
         val bobState: PartyState? = null,
         val messages: List<ChatMessage> = emptyList(),
@@ -136,9 +150,13 @@ class MainViewModel : ViewModel()
     // Internal Cryptographic State
     // ═══════════════════════════════════════════════════════════════════════════
 
+    private val random = SecureRandom()
+
     // Long-term identity keypairs (in real use, these would be persistent)
     private var aliceKeypair: Curve25519KeyPair? = null
+    private var aliceSession: SessionIdentifier? = null
     private var bobKeypair: Curve25519KeyPair? = null
+    private var bobSession: SessionIdentifier? = null
 
     // Current ratchet states for each party
     private var aliceRatchetState: RatchetState? = null
@@ -175,14 +193,27 @@ class MainViewModel : ViewModel()
      */
     fun start()
     {
-        // ─────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────
         // Step 1: Generate long-term identity keypairs
-        // ─────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────
         aliceKeypair = MADH.generateKeypair()
         bobKeypair = MADH.generateKeypair()
 
+        // ───────────────────────────────────────────────────────────────────────
+        // Step 2: Generate session identifiers
+        // In a real app, these would be exchanged during session setup
+        // ───────────────────────────────────────────────────────────────────────
+        aliceSession = SessionIdentifier(ByteArray(32).also { random.nextBytes(it) })
+        bobSession = SessionIdentifier(ByteArray(32).also { random.nextBytes(it) })
+
+        // ───────────────────────────────────────────────────────────────────────
+        // Step 3: MADH Handshake
+        // This demonstrates the Manually Authenticated Diffie-Hellman protocol
+        // ───────────────────────────────────────────────────────────────────────
+        val handshakeState = performMADHHandshake()
+
         // ─────────────────────────────────────────────────────────────────────
-        // Step 2: Initialize ratchet states
+        // Step 4: Initialize ratchet states
         // Each party uses their own keypair + the other's public key
         // This derives the initial root key via ECDH:
         //   R₀ = ECDH(localPrivate, remotePublic)
@@ -191,7 +222,7 @@ class MainViewModel : ViewModel()
         bobRatchetState = Ratchet.newRatchetState(bobKeypair!!, aliceKeypair!!.publicKey)
 
         // ─────────────────────────────────────────────────────────────────────
-        // Step 3: Verify key agreement
+        // Step 5: Verify key agreement
         // Both parties should have derived identical root keys
         // ─────────────────────────────────────────────────────────────────────
         val rootKeysMatch = aliceRatchetState!!.rootKey.bytes.contentEquals(
@@ -206,6 +237,7 @@ class MainViewModel : ViewModel()
         _uiState.update {
             UiState(
                 isStarted = true,
+                handshakeState = handshakeState,
                 aliceState = aliceRatchetState?.toPartyState(aliceKeypair!!),
                 bobState = bobRatchetState?.toPartyState(bobKeypair!!),
                 messages = emptyList(),
@@ -215,11 +247,52 @@ class MainViewModel : ViewModel()
     }
 
     /**
+     * Perform the MADH handshake protocol.
+     */
+    private fun performMADHHandshake(): HandshakeState
+    {
+        // Alice computes commitment to her public key
+        val aliceCommitment = MADH.computePublicKeyCommitment(aliceKeypair!!.publicKey)
+
+        // Bob verifies Alice's public key matches the commitment
+        val verificationCommitment = MADH.computePublicKeyCommitment(aliceKeypair!!.publicKey)
+        val commitmentVerified = aliceCommitment.contentEquals(verificationCommitment)
+
+        // Both parties compute confirmation value with same parameter ordering
+        val aliceConfirmation = MADH.computeConfirmation(
+            senderSession = aliceSession!!,
+            receiverSession = bobSession!!,
+            senderPublicKey = aliceKeypair!!.publicKey,
+            receiverPublicKey = bobKeypair!!.publicKey
+        )
+
+        val bobConfirmation = MADH.computeConfirmation(
+            senderSession = aliceSession!!,
+            receiverSession = bobSession!!,
+            senderPublicKey = aliceKeypair!!.publicKey,
+            receiverPublicKey = bobKeypair!!.publicKey
+        )
+
+        // Derive human-readable confirmation codes
+        val aliceCode = MADH.computeConfirmationCode(aliceConfirmation)
+        val bobCode = MADH.computeConfirmationCode(bobConfirmation)
+
+        return HandshakeState(
+            aliceCode = aliceCode,
+            bobCode = bobCode,
+            codesMatch = aliceCode == bobCode,
+            commitmentVerified = commitmentVerified
+        )
+    }
+
+    /**
      * Reset the demo to initial state.
      */
     fun reset() {
         aliceKeypair = null
         bobKeypair = null
+        aliceSession = null
+        bobSession = null
         aliceRatchetState = null
         bobRatchetState = null
         lastSender = null

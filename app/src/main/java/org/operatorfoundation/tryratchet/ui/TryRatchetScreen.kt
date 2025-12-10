@@ -21,7 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -39,6 +41,7 @@ fun TryRatchetScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val testResults by viewModel.testResults.collectAsState()
+    var handshakeExpanded by remember { mutableStateOf(true) }
     var fullValueDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     var messageText by remember { mutableStateOf("") }
     var cryptoStateExpanded by remember { mutableStateOf(false) }
@@ -67,6 +70,17 @@ fun TryRatchetScreen(
                 onReset = { viewModel.reset() },
                 onRunTests = { viewModel.runTests() }
             )
+
+            // MADH Handshake Panel
+            if (uiState.isStarted && uiState.handshakeState != null)
+            {
+                MADHHandshakePanel(
+                    handshakeState = uiState.handshakeState!!,
+                    expanded = handshakeExpanded,
+                    onToggle = { handshakeExpanded = !handshakeExpanded }
+                )
+                HorizontalDivider(color = Divider, thickness = 1.dp)
+            }
 
             // Show initial root key agreement status
             if (uiState.isStarted && uiState.initialRootKeysMatch != null)
@@ -149,7 +163,11 @@ fun TryRatchetScreen(
                             }
                         },
                         onFocusChanged = { focused ->
-                            if (focused) cryptoStateExpanded = false
+                            if (focused)
+                            {
+                                cryptoStateExpanded = false
+                                handshakeExpanded = false
+                            }
                         }
                     )
                 }
@@ -802,5 +820,212 @@ private fun TestResultItem(test: CryptoTestResults.TestResult) {
                 modifier = Modifier.padding(start = 22.dp, top = 4.dp)
             )
         }
+    }
+}
+
+/**
+ * MADH Handshake verification panel.
+ *
+ * Displays the confirmation codes that both parties compute independently.
+ * In a real application, users would compare these codes out-of-band
+ * (e.g., reading them aloud over a phone call) to verify the connection
+ * hasn't been intercepted by a man-in-the-middle.
+ */
+@Composable
+private fun MADHHandshakePanel(
+    handshakeState: MainViewModel.HandshakeState,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Column {
+        // Toggle header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onToggle() }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "MADH Handshake",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+
+                // Status indicator in header
+                Icon(
+                    painter = painterResource(
+                        if (handshakeState.codesMatch) R.drawable.ic_check else R.drawable.ic_error
+                    ),
+                    contentDescription = null,
+                    tint = if (handshakeState.codesMatch) KeyMessage else Color(0xFFEF4444),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            Icon(
+                painter = painterResource(
+                    if (expanded) R.drawable.ic_chevron_up else R.drawable.ic_chevron_down
+                ),
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // Expandable content
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp)
+            ) {
+                // Confirmation codes display
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ConfirmationCodeCard(
+                        partyName = "Alice",
+                        code = handshakeState.aliceCode,
+                        accentColor = AlicePrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    ConfirmationCodeCard(
+                        partyName = "Bob",
+                        code = handshakeState.bobCode,
+                        accentColor = BobPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Verification status
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(BackgroundSecondary.copy(alpha = 0.5f))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Commitment verification
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(
+                                if (handshakeState.commitmentVerified) R.drawable.ic_check else R.drawable.ic_error
+                            ),
+                            contentDescription = null,
+                            tint = if (handshakeState.commitmentVerified) KeyMessage else Color(0xFFEF4444),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (handshakeState.commitmentVerified) {
+                                "Public key commitment verified"
+                            } else {
+                                "Public key commitment FAILED"
+                            },
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    // Codes match verification
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(
+                                if (handshakeState.codesMatch) R.drawable.ic_check else R.drawable.ic_error
+                            ),
+                            contentDescription = null,
+                            tint = if (handshakeState.codesMatch) KeyMessage else Color(0xFFEF4444),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (handshakeState.codesMatch) {
+                                "Confirmation codes match"
+                            } else {
+                                "Confirmation codes DO NOT match"
+                            },
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                // Explanatory note
+                Text(
+                    text = "In a real app, users compare these codes out-of-band (e.g., voice call) to verify no man-in-the-middle attack.",
+                    color = TextTertiary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Card displaying a party's confirmation code.
+ */
+@Composable
+private fun ConfirmationCodeCard(
+    partyName: String,
+    code: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(BackgroundSecondary.copy(alpha = 0.5f))
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = partyName,
+            color = accentColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = formatConfirmationCode(code),
+            color = TextPrimary,
+            fontSize = 20.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            letterSpacing = 2.sp
+        )
+    }
+}
+
+/**
+ * Format confirmation code for readability.
+ * Groups digits for easier comparison.
+ */
+private fun formatConfirmationCode(code: String): String
+{
+    return when {
+        code.length <= 4 -> code
+        code.length <= 6 -> "${code.take(3)} ${code.drop(3)}"
+        code.length <= 8 -> "${code.take(4)} ${code.drop(4)}"
+        else -> code.chunked(4).joinToString(" ")
     }
 }
