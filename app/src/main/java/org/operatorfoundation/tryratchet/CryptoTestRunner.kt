@@ -4,16 +4,15 @@ import org.operatorfoundation.aes.AesCipher
 import org.operatorfoundation.aes.AesGcmKey
 import org.operatorfoundation.aes.Ciphertext
 import org.operatorfoundation.aes.Nonce
-import org.operatorfoundation.madh.Curve25519KeyPair
 import org.operatorfoundation.madh.MADH
 import org.operatorfoundation.madh.SessionIdentifier
 import org.operatorfoundation.ratchet.PlaintextMessage
 import org.operatorfoundation.ratchet.PlaintextMessageType
 import org.operatorfoundation.ratchet.Ratchet
-import org.operatorfoundation.ratchet.RatchetState
 import java.security.SecureRandom
 import org.operatorfoundation.tryratchet.CryptoTestResults.TestResult
 import org.operatorfoundation.tryratchet.CryptoTestResults.Category
+import org.operatorfoundation.unishox2.Unishox2
 
 /**
  * Test runner for the cryptographic library suite.
@@ -95,7 +94,9 @@ object CryptoTestRunner
         // ═══════════════════════════════════════════════════════════════════
         results.add(testRatchetTwoPartyFirstMessage())
         results.add(testRatchetTwoPartyReply())
-        results.add(testRatchetTwoPartyConversation())
+        results.add(testRatchetTwoPartyConversationUncompressed())
+        results.add(testRatchetTwoPartyConversationCompressed())
+        results.add(testRatchetTwoPartyConversationData())
 
         // ═══════════════════════════════════════════════════════════════════
         // End-to-End Tests
@@ -808,9 +809,7 @@ object CryptoTestRunner
 
             val initialState = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
             val newRemoteEphemeral = MADH.generateKeypair().publicKey
-
-            val newState = Ratchet.ratchetWithNewKey(initialState, newRemoteEphemeral)
-
+            val newState = Ratchet.ratchetForReceive(initialState, newRemoteEphemeral)
             val rootKeyChanged = !initialState.rootKey.bytes.contentEquals(newState.rootKey.bytes)
             val hasChainKey = newState.chainKey != null
             val hasMessageKey = newState.messageKey != null
@@ -842,7 +841,8 @@ object CryptoTestRunner
     /**
      * Test: Symmetric ratchet advances chain and message keys
      */
-    private fun testRatchetSymmetricStep(): TestResult {
+    private fun testRatchetSymmetricStep(): TestResult
+    {
         return try {
             val aliceKeypair = MADH.generateKeypair()
             val bobKeypair = MADH.generateKeypair()
@@ -851,10 +851,10 @@ object CryptoTestRunner
             val remoteEphemeral = MADH.generateKeypair().publicKey
 
             // First do DH ratchet to get chain key
-            val state1 = Ratchet.ratchetWithNewKey(initialState, remoteEphemeral)
+            val state1 = Ratchet.ratchetForReceive(initialState, remoteEphemeral)
 
             // Then do symmetric ratchet
-            val state2 = Ratchet.ratchetWithoutNewKey(state1)
+            val state2 = Ratchet.symmetricRatchet(state1)
 
             val rootKeySame = state1.rootKey.bytes.contentEquals(state2.rootKey.bytes)
             val chainKeyChanged = !state1.chainKey!!.bytes.contentEquals(state2.chainKey!!.bytes)
@@ -868,7 +868,9 @@ object CryptoTestRunner
                 details = "Root same: $rootKeySame, Chain changed: $chainKeyChanged, " +
                         "Message key changed: $messageKeyChanged, Message #: ${state2.messageNumber}"
             )
-        } catch (e: Exception) {
+        }
+        catch (e: Exception)
+        {
             TestResult(
                 category = Category.RATCHET_SYMMETRIC,
                 name = "Symmetric Ratchet Step",
@@ -885,14 +887,15 @@ object CryptoTestRunner
      * This is how the library's own tests work - using the same
      * message key for both encrypt and decrypt.
      */
-    private fun testRatchetEncryptDecryptSameState(): TestResult {
+    private fun testRatchetEncryptDecryptSameState(): TestResult
+    {
         return try {
             val aliceKeypair = MADH.generateKeypair()
             val bobKeypair = MADH.generateKeypair()
 
             val initialState = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
             val remoteEphemeral = MADH.generateKeypair().publicKey
-            val state = Ratchet.ratchetWithNewKey(initialState, remoteEphemeral)
+            val state = Ratchet.ratchetForReceive(initialState, remoteEphemeral)
 
             val plaintext = PlaintextMessage(
                 PlaintextMessageType.UNCOMPRESSED_TEXT,
@@ -933,9 +936,11 @@ object CryptoTestRunner
             val initialState = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
             val remoteEphemeral = MADH.generateKeypair().publicKey
 
-            val state1 = Ratchet.ratchetWithNewKey(initialState, remoteEphemeral)
-            val state2 = Ratchet.ratchetWithoutNewKey(state1)
-            val state3 = Ratchet.ratchetWithoutNewKey(state2)
+            val state1 = Ratchet.ratchetForReceive(initialState, remoteEphemeral)
+            val sendResult1 = Ratchet.ratchetForSend(state1)
+            val state2 = sendResult1.state
+            val sendResult2 = Ratchet.ratchetForSend(state2)
+            val state3 = sendResult2.state
 
             val key1 = state1.messageKey!!.bytes
             val key2 = state2.messageKey!!.bytes
@@ -972,8 +977,6 @@ object CryptoTestRunner
      * This tests whether Alice and Bob can derive the same message key
      * when Alice sends the first message to Bob.
      *
-     * EXPECTED TO FAIL with current library implementation.
-     *
      * Protocol:
      * 1. Alice ratchets (generates new ephemeral, uses Bob's longterm pub)
      * 2. Alice encrypts and "sends" ciphertext + her ephemeral pub
@@ -998,7 +1001,7 @@ object CryptoTestRunner
 
             // Alice sends first message (DH ratchet)
             // She uses Bob's longterm public key since no ephemeral yet
-            aliceState = Ratchet.ratchetWithNewKey(aliceState, bobKeypair.publicKey)
+            aliceState = Ratchet.ratchetForReceive(aliceState, bobKeypair.publicKey)
             val aliceEphemeralPub = aliceState.localEphemeralKeypair!!.publicKey
 
             val plaintext = PlaintextMessage(
@@ -1009,7 +1012,7 @@ object CryptoTestRunner
 
             // Bob receives and ratchets using Alice's ephemeral
             // BUG: This generates a new keypair for Bob instead of using existing
-            bobState = Ratchet.ratchetWithNewKey(bobState, aliceEphemeralPub)
+            bobState = Ratchet.ratchetForReceive(bobState, aliceEphemeralPub)
 
             // Check if keys match
             val keysMatch = aliceState.messageKey!!.bytes.contentEquals(bobState.messageKey!!.bytes)
@@ -1049,10 +1052,9 @@ object CryptoTestRunner
      * Test: Two-party reply scenario
      *
      * After Alice sends to Bob, Bob sends a reply.
-     *
-     * EXPECTED TO FAIL with current library implementation.
      */
-    private fun testRatchetTwoPartyReply(): TestResult {
+    private fun testRatchetTwoPartyReply(): TestResult
+    {
         return try {
             val aliceKeypair = MADH.generateKeypair()
             val bobKeypair = MADH.generateKeypair()
@@ -1061,16 +1063,17 @@ object CryptoTestRunner
             var bobState = Ratchet.newRatchetState(bobKeypair, aliceKeypair.publicKey)
 
             // Alice sends first message
-            aliceState = Ratchet.ratchetWithNewKey(aliceState, bobKeypair.publicKey)
+            val aliceSendResult = Ratchet.ratchetForSend(aliceState)
+            aliceState = aliceSendResult.state
             val aliceEph1 = aliceState.localEphemeralKeypair!!.publicKey
 
             // Bob receives (ratchets)
-            bobState = Ratchet.ratchetWithNewKey(bobState, aliceEph1)
-            val bobEph1 = bobState.localEphemeralKeypair!!.publicKey
+            bobState = Ratchet.ratchetForReceive(bobState, aliceEph1)
 
             // Bob sends reply
-            bobState = Ratchet.ratchetWithNewKey(bobState, aliceEph1)
-            val bobEph2 = bobState.localEphemeralKeypair!!.publicKey
+            val bobSendResult = Ratchet.ratchetForSend(bobState)
+            bobState = bobSendResult.state
+            val bobEph1 = bobState.localEphemeralKeypair!!.publicKey
 
             val plaintext = PlaintextMessage(
                 PlaintextMessageType.UNCOMPRESSED_TEXT,
@@ -1079,15 +1082,18 @@ object CryptoTestRunner
             val ciphertext = Ratchet.encrypt(bobState.messageKey!!, plaintext)
 
             // Alice receives Bob's reply
-            aliceState = Ratchet.ratchetWithNewKey(aliceState, bobEph2)
+            aliceState = Ratchet.ratchetForReceive(aliceState, bobEph1)
 
             val keysMatch = aliceState.messageKey!!.bytes.contentEquals(bobState.messageKey!!.bytes)
 
             var decryptSuccess = false
-            try {
+
+            try
+            {
                 Ratchet.decrypt(aliceState.messageKey!!, ciphertext)
                 decryptSuccess = true
-            } catch (e: Exception) {
+            }
+            catch (e: Exception) {
                 // Expected to fail
             }
 
@@ -1097,7 +1103,9 @@ object CryptoTestRunner
                 passed = keysMatch && decryptSuccess,
                 details = "Keys match: $keysMatch, Decrypt success: $decryptSuccess"
             )
-        } catch (e: Exception) {
+        }
+        catch (e: Exception)
+        {
             TestResult(
                 category = Category.RATCHET_TWO_PARTY,
                 name = "Two-Party Reply",
@@ -1112,10 +1120,9 @@ object CryptoTestRunner
      * Test: Full two-party conversation
      *
      * Alice → Bob → Alice → Bob
-     *
-     * EXPECTED TO FAIL with current library implementation.
      */
-    private fun testRatchetTwoPartyConversation(): TestResult {
+    private fun testRatchetTwoPartyConversationUncompressed(): TestResult
+    {
         return try {
             val aliceKeypair = MADH.generateKeypair()
             val bobKeypair = MADH.generateKeypair()
@@ -1131,46 +1138,59 @@ object CryptoTestRunner
                 Pair("bob", "Message 4: Bob to Alice again")
             )
 
-            for ((sender, text) in messages) {
+            for ((sender, text) in messages)
+            {
                 val plaintext = PlaintextMessage(
                     PlaintextMessageType.UNCOMPRESSED_TEXT,
                     text.toByteArray()
                 )
 
-                if (sender == "alice") {
+                if (sender == "alice")
+                {
                     // Alice sends
                     val remoteKey = bobState.localEphemeralKeypair?.publicKey
                         ?: bobKeypair.publicKey
-                    aliceState = Ratchet.ratchetWithNewKey(aliceState, remoteKey)
+
+                    val aliceSendResult = Ratchet.ratchetForSend(aliceState)
+                    aliceState = aliceSendResult.state
+
                     val aliceEph = aliceState.localEphemeralKeypair!!.publicKey
 
                     val ciphertext = Ratchet.encrypt(aliceState.messageKey!!, plaintext)
 
                     // Bob receives
-                    bobState = Ratchet.ratchetWithNewKey(bobState, aliceEph)
+                    bobState = Ratchet.ratchetForReceive(bobState, aliceEph)
 
-                    try {
+                    try
+                    {
                         Ratchet.decrypt(bobState.messageKey!!, ciphertext)
                         successCount++
-                    } catch (e: Exception) {
+                    }
+                    catch (e: Exception) {
                         // Failed
                     }
-                } else {
+                }
+                else
+                {
                     // Bob sends
                     val remoteKey = aliceState.localEphemeralKeypair?.publicKey
                         ?: aliceKeypair.publicKey
-                    bobState = Ratchet.ratchetWithNewKey(bobState, remoteKey)
+
+                    val bobSendResult = Ratchet.ratchetForSend(bobState)
+                    bobState = bobSendResult.state
                     val bobEph = bobState.localEphemeralKeypair!!.publicKey
 
                     val ciphertext = Ratchet.encrypt(bobState.messageKey!!, plaintext)
 
                     // Alice receives
-                    aliceState = Ratchet.ratchetWithNewKey(aliceState, bobEph)
+                    aliceState = Ratchet.ratchetForReceive(aliceState, bobEph)
 
-                    try {
+                    try
+                    {
                         Ratchet.decrypt(aliceState.messageKey!!, ciphertext)
                         successCount++
-                    } catch (e: Exception) {
+                    }
+                    catch (e: Exception) {
                         // Failed
                     }
                 }
@@ -1178,14 +1198,212 @@ object CryptoTestRunner
 
             TestResult(
                 category = Category.RATCHET_TWO_PARTY,
-                name = "Two-Party Conversation",
+                name = "Two-Party Conversation Uncompressed",
                 passed = successCount == messages.size,
                 details = "Successful decryptions: $successCount/${messages.size}"
             )
         } catch (e: Exception) {
             TestResult(
                 category = Category.RATCHET_TWO_PARTY,
-                name = "Two-Party Conversation",
+                name = "Two-Party Conversation Uncompressed",
+                passed = false,
+                details = "Exception thrown",
+                errorMessage = e.message
+            )
+        }
+    }
+
+    private fun testRatchetTwoPartyConversationCompressed(): TestResult
+    {
+        return try {
+            val aliceKeypair = MADH.generateKeypair()
+            val bobKeypair = MADH.generateKeypair()
+
+            var aliceState = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
+            var bobState = Ratchet.newRatchetState(bobKeypair, aliceKeypair.publicKey)
+
+            var successCount = 0
+            val messages = listOf(
+                Pair("alice", "Message 1: Alice to Bob"),
+                Pair("bob", "Message 2: Bob to Alice"),
+                Pair("alice", "Message 3: Alice to Bob again"),
+                Pair("bob", "Message 4: Bob to Alice again")
+            )
+
+            for ((index, message) in messages.withIndex())
+            {
+                val (sender, text) = message
+
+                val plaintext = PlaintextMessage(
+                    PlaintextMessageType.COMPRESSED_TEXT,
+                    Unishox2.compress(text)
+                )
+
+                if (sender == "alice")
+                {
+                    // Alice sends
+                    val remoteKey = bobState.localEphemeralKeypair?.publicKey
+                        ?: bobKeypair.publicKey
+
+                    val aliceSendResult = Ratchet.ratchetForSend(aliceState)
+                    aliceState = aliceSendResult.state
+
+                    val aliceEph = aliceState.localEphemeralKeypair!!.publicKey
+
+                    val ciphertext = Ratchet.encrypt(aliceState.messageKey!!, plaintext)
+
+                    // Bob receives
+                    bobState = Ratchet.ratchetForReceive(bobState, aliceEph)
+
+                    try
+                    {
+                        val compressedMessage = Ratchet.decrypt(bobState.messageKey!!, ciphertext)
+                        val decompressedMessage = Unishox2.decompress(compressedMessage.bytes)
+
+                        if (decompressedMessage == messages[index].second)
+                        {
+                            successCount++
+                        }
+                    }
+                    catch (e: Exception) {
+                        // Failed
+                    }
+                }
+                else
+                {
+                    // Bob sends
+                    val remoteKey = aliceState.localEphemeralKeypair?.publicKey
+                        ?: aliceKeypair.publicKey
+
+                    val bobSendResult = Ratchet.ratchetForSend(bobState)
+                    bobState = bobSendResult.state
+                    val bobEph = bobState.localEphemeralKeypair!!.publicKey
+
+                    val ciphertext = Ratchet.encrypt(bobState.messageKey!!, plaintext)
+
+                    // Alice receives
+                    aliceState = Ratchet.ratchetForReceive(aliceState, bobEph)
+
+                    try
+                    {
+                        val compressedMessage = Ratchet.decrypt(aliceState.messageKey!!, ciphertext)
+                        val decompressedMessage = Unishox2.decompress(compressedMessage.bytes)
+
+                        if (decompressedMessage == messages[index].second)
+                        {
+                            successCount++
+                        }
+                    }
+                    catch (e: Exception) {
+                        // Failed
+                    }
+                }
+            }
+
+            TestResult(
+                category = Category.RATCHET_TWO_PARTY,
+                name = "Two-Party Conversation Compressed",
+                passed = successCount == messages.size,
+                details = "Successful decryptions: $successCount/${messages.size}"
+            )
+        }
+        catch (e: Exception)
+        {
+            TestResult(
+                category = Category.RATCHET_TWO_PARTY,
+                name = "Two-Party Conversation Compressed",
+                passed = false,
+                details = "Exception thrown",
+                errorMessage = e.message
+            )
+        }
+    }
+
+    private fun testRatchetTwoPartyConversationData(): TestResult
+    {
+        return try {
+            val aliceKeypair = MADH.generateKeypair()
+            val bobKeypair = MADH.generateKeypair()
+
+            var aliceState = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
+            var bobState = Ratchet.newRatchetState(bobKeypair, aliceKeypair.publicKey)
+
+            var successCount = 0
+            val messages = listOf(
+                Pair("alice", byteArrayOf(1, 2, 3, 4)),
+                Pair("bob", byteArrayOf(5, 6, 7, 8, 9)),
+                Pair("alice", byteArrayOf(4, 3, 2)),
+                Pair("bob", byteArrayOf(2, 2, 2, 2, 2, 2))
+            )
+
+            for ((sender, data) in messages)
+            {
+                val plaintext = PlaintextMessage(
+                    PlaintextMessageType.DATA,
+                    data
+                )
+
+                if (sender == "alice")
+                {
+                    // Alice sends
+                    val remoteKey = bobState.localEphemeralKeypair?.publicKey
+                        ?: bobKeypair.publicKey
+
+                    val aliceSendResult = Ratchet.ratchetForSend(aliceState)
+                    aliceState = aliceSendResult.state
+
+                    val aliceEph = aliceState.localEphemeralKeypair!!.publicKey
+
+                    val ciphertext = Ratchet.encrypt(aliceState.messageKey!!, plaintext)
+
+                    // Bob receives
+                    bobState = Ratchet.ratchetForReceive(bobState, aliceEph)
+
+                    try
+                    {
+                        Ratchet.decrypt(bobState.messageKey!!, ciphertext)
+                        successCount++
+                    }
+                    catch (e: Exception) {
+                        // Failed
+                    }
+                }
+                else
+                {
+                    // Bob sends
+                    val remoteKey = aliceState.localEphemeralKeypair?.publicKey
+                        ?: aliceKeypair.publicKey
+
+                    val bobSendResult = Ratchet.ratchetForSend(bobState)
+                    bobState = bobSendResult.state
+                    val bobEph = bobState.localEphemeralKeypair!!.publicKey
+
+                    val ciphertext = Ratchet.encrypt(bobState.messageKey!!, plaintext)
+
+                    // Alice receives
+                    aliceState = Ratchet.ratchetForReceive(aliceState, bobEph)
+
+                    try
+                    {
+                        Ratchet.decrypt(aliceState.messageKey!!, ciphertext)
+                        successCount++
+                    }
+                    catch (e: Exception) {
+                        // Failed
+                    }
+                }
+            }
+
+            TestResult(
+                category = Category.RATCHET_TWO_PARTY,
+                name = "Two-Party Conversation Data",
+                passed = successCount == messages.size,
+                details = "Successful decryptions: $successCount/${messages.size}"
+            )
+        } catch (e: Exception) {
+            TestResult(
+                category = Category.RATCHET_TWO_PARTY,
+                name = "Two-Party Conversation Data",
                 passed = false,
                 details = "Exception thrown",
                 errorMessage = e.message
@@ -1203,7 +1421,8 @@ object CryptoTestRunner
      * This demonstrates that the individual components work correctly,
      * even if two-party synchronization doesn't.
      */
-    private fun testEndToEndWithSameState(): TestResult {
+    private fun testEndToEndWithSameState(): TestResult
+    {
         return try {
             // Generate keys
             val aliceKeypair = MADH.generateKeypair()
@@ -1213,13 +1432,14 @@ object CryptoTestRunner
             var state = Ratchet.newRatchetState(aliceKeypair, bobKeypair.publicKey)
 
             // DH ratchet
-            state = Ratchet.ratchetWithNewKey(state, bobKeypair.publicKey)
+            state = Ratchet.ratchetForReceive(state, bobKeypair.publicKey)
 
             // Send multiple messages with symmetric ratchet
             val messages = listOf("First message", "Second message", "Third message")
             var allSuccess = true
 
-            for (text in messages) {
+            for (text in messages)
+            {
                 val plaintext = PlaintextMessage(
                     PlaintextMessageType.UNCOMPRESSED_TEXT,
                     text.toByteArray()
@@ -1234,7 +1454,7 @@ object CryptoTestRunner
                 }
 
                 // Advance ratchet for next message
-                state = Ratchet.ratchetWithoutNewKey(state)
+                state = Ratchet.symmetricRatchet(state)
             }
 
             TestResult(
@@ -1243,7 +1463,9 @@ object CryptoTestRunner
                 passed = allSuccess,
                 details = "All ${messages.size} messages encrypted/decrypted successfully"
             )
-        } catch (e: Exception) {
+        }
+        catch (e: Exception)
+        {
             TestResult(
                 category = Category.END_TO_END,
                 name = "End-to-End Same State",

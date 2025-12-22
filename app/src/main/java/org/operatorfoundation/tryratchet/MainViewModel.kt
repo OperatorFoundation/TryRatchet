@@ -485,7 +485,8 @@ class MainViewModel : ViewModel()
                 if (isAlice) bobKeypair!!.publicKey else aliceKeypair!!.publicKey
             }
 
-            senderState = Ratchet.ratchetWithNewKey(senderState, remoteEphemeralKey)
+            val sendResult = Ratchet.ratchetForSend(senderState)
+            senderState = sendResult.state
 
             // Save our new ephemeral public key to "transmit" to receiver
             ephemeralPublicKey = senderState.localEphemeralKeypair?.publicKey
@@ -499,7 +500,7 @@ class MainViewModel : ViewModel()
             // Symmetric Ratchet: Just advance the chain
             // No new DH operation, just derive next chain and message keys
             // ─────────────────────────────────────────────────────────────────
-            senderState = Ratchet.ratchetWithoutNewKey(senderState)
+            senderState = Ratchet.symmetricRatchet(senderState)
         }
 
         // Update sender's state
@@ -544,7 +545,7 @@ class MainViewModel : ViewModel()
                 if (isAlice) aliceKeypair!!.publicKey else bobKeypair!!.publicKey
             }
 
-            receiverState = Ratchet.ratchetWithNewKey(receiverState, ephemeralKey)
+            receiverState = Ratchet.ratchetForReceive(receiverState, ephemeralKey)
 
             // Save receiver's new ephemeral public key for potential reply
             pendingEphemeralKey = receiverState.localEphemeralKeypair?.publicKey
@@ -554,7 +555,7 @@ class MainViewModel : ViewModel()
             // ─────────────────────────────────────────────────────────────────
             // Symmetric ratchet: advance chain to match sender
             // ─────────────────────────────────────────────────────────────────
-            receiverState = Ratchet.ratchetWithoutNewKey(receiverState)
+            receiverState = Ratchet.symmetricRatchet(receiverState)
         }
 
         // Update receiver's state
