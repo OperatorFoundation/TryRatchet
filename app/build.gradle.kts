@@ -42,7 +42,7 @@ android {
 }
 
 dependencies {
-    implementation("com.github.OperatorFoundation:RatchetAndroid:v1.1.0")
+    implementation("com.github.OperatorFoundation:RatchetAndroid:v1.1.1")
     implementation("com.github.OperatorFoundation:MADHAndroid:v1.0.4")
     implementation("com.github.OperatorFoundation:AESAndroid:v1.0.0")
     implementation("com.github.OperatorFoundation:Unishox2Android:v1.0.0")
