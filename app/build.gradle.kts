@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "org.operatorfoundation.tryratchet"
-        minSdk = 33
+        minSdk = 28
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -42,9 +42,9 @@ android {
 }
 
 dependencies {
-    implementation("com.github.OperatorFoundation:RatchetAndroid:v1.1.1")
-    implementation("com.github.OperatorFoundation:MADHAndroid:v1.0.4")
-    implementation("com.github.OperatorFoundation:AESAndroid:v1.0.0")
+    implementation("com.github.OperatorFoundation:RatchetAndroid:v1.1.3")
+    implementation("com.github.OperatorFoundation:MADHAndroid:v1.0.5")
+    implementation("com.github.OperatorFoundation:AESAndroid:v1.0.1")
     implementation("com.github.OperatorFoundation:Unishox2Android:v1.0.0")
 
     // AndroidX Core
